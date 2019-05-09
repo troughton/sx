@@ -131,6 +131,7 @@ SX_API void            sx_job_destroy_context(sx_job_context* ctx, const sx_allo
 SX_API sx_job_t sx_job_dispatch(sx_job_context* ctx, const sx_job_desc* descs, int count,
                                 unsigned int tags sx_default(0));
 SX_API uint32_t sx_job_get_thread_index(sx_job_context* ctx);
+SX_API void     sx_job_wait(sx_job_context* ctx, sx_job_t job);
 SX_API void     sx_job_wait_and_del(sx_job_context* ctx, sx_job_t job);
 SX_API bool     sx_job_test_and_del(sx_job_context* ctx, sx_job_t job);
 SX_API int      sx_job_num_worker_threads(sx_job_context* ctx);
