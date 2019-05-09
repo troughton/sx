@@ -43,6 +43,7 @@ typedef struct sx__job_thread_data {
     sx_fiber_stack selector_stack;
     sx_fiber_t     selector_fiber;
     uint32_t       tid;
+    uint32_t       tindex;
     uint32_t       tags;
     bool           main_thrd;
 } sx__job_thread_data;
@@ -413,12 +414,13 @@ bool sx_job_test_and_del(sx_job_context* ctx, sx_job_t job) {
     return false;
 }
 
-static sx__job_thread_data* sx__job_create_tdata(const sx_alloc* alloc, uint32_t tid,
+static sx__job_thread_data* sx__job_create_tdata(const sx_alloc* alloc, uint32_t tid, uint32_t tindex,
                                                  bool main_thrd) {
     sx__job_thread_data* tdata =
         (sx__job_thread_data*)sx_malloc(alloc, sizeof(sx__job_thread_data));
     sx_memset(tdata, 0x0, sizeof(sx__job_thread_data));
     tdata->tid = tid;
+    tdata->tindex = tindex;
     tdata->tags = 0xffffffff;
     tdata->main_thrd = main_thrd;
 
@@ -441,7 +443,7 @@ static int sx__job_thread_fn(void* user1, void* user2) {
     uint32_t thread_id = sx_thread_tid();
 
     // Create thread data
-    sx__job_thread_data* tdata = sx__job_create_tdata(ctx->alloc, thread_id, false);
+    sx__job_thread_data* tdata = sx__job_create_tdata(ctx->alloc, thread_id, index, false);
     if (!tdata) {
         sx_assert(tdata && "ThreadData create failed!");
         return -1;
@@ -482,7 +484,7 @@ sx_job_context* sx_job_create_context(const sx_alloc* alloc, const sx_job_contex
 
     sx_semaphore_init(&ctx->sem);
 
-    sx__job_thread_data* main_tdata = sx__job_create_tdata(alloc, sx_thread_tid(), true);
+    sx__job_thread_data* main_tdata = sx__job_create_tdata(alloc, sx_thread_tid(), 0, true);
     if (!main_tdata) {
         sx_free(alloc, ctx);
         return NULL;
@@ -507,7 +509,7 @@ sx_job_context* sx_job_create_context(const sx_alloc* alloc, const sx_job_contex
             char name[32];
             sx_snprintf(name, sizeof(name), "sx_job_thread(%d)", i + 1);
             ctx->threads[i] = sx_thread_create(alloc, sx__job_thread_fn, ctx, sx_os_minstacksz(),
-                                               name, (void*)(intptr_t)i);
+                                               name, (void*)(intptr_t)(i + 1));
             sx_assert(ctx->threads[i] && "sx_thread_create failed!");
         }
     }
@@ -552,4 +554,10 @@ void sx_job_set_current_thread_tags(sx_job_context* ctx, uint32_t tags) {
     sx__job_thread_data* tdata = (sx__job_thread_data*)sx_tls_get(ctx->thread_tls);
     sx_assert(tdata);
     tdata->tags = tags;
+}
+
+SX_API uint32_t sx_job_get_thread_index(sx_job_context* ctx) {
+    sx__job_thread_data* tdata = (sx__job_thread_data*)sx_tls_get(ctx->thread_tls);
+    sx_assert(tdata);
+    return tdata->tindex;
 }
