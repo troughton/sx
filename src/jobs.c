@@ -164,8 +164,17 @@ static sx__job_select_result sx__job_select(sx_job_context* ctx, uint32_t tid, u
         while (node) {
             r.waiting_list_alive = true;
             if (*node->wait_counter == 0) {    // job must not be waiting/depend on any jobs
+                bool hasPendingDependencies = false;
+                for (size_t i = 0; i < node->desc.dependency_count; i += 1) {
+                    if (*(node->desc.dependencies[i]) > 0) {
+                        hasPendingDependencies = true;
+                        break;
+                    }
+                }
+                
                 if ((node->owner_tid == 0 || node->owner_tid == tid) &&
-                    (node->tags == 0 || (node->tags & tags))) {
+                    (node->tags == 0 || (node->tags & tags)) &&
+                    !hasPendingDependencies) {
                     r.job = node;
                     sx__job_remove_list(&ctx->waiting_list[pr], &ctx->waiting_list_last[pr], node);
                     break;
@@ -347,50 +356,6 @@ static void sx__job_process_pending_single(sx_job_context* ctx, int index) {
         sx_semaphore_post(&ctx->sem, count);
     }
 }
-
-void sx_job_wait(sx_job_context* ctx, sx_job_t job) {
-    sx__job_thread_data* tdata = (sx__job_thread_data*)sx_tls_get(ctx->thread_tls);
-    
-    sx_compiler_read_barrier();
-    while (*job > 0) {
-        // check if the current job is the pending list
-        sx_lock(&ctx->job_lk);
-        for (int i = 0, c = sx_array_count(ctx->pending); i < c; i++) {
-            if (ctx->pending[i].counter == job) {
-                sx__job_process_pending_single(ctx, i);
-                break;
-            }
-        }
-        sx_unlock(&ctx->job_lk);
-        
-        // If thread is running a job, make it slave to the thread so it can only be picked up by
-        // this thread And push the job back to waiting_list
-        if (tdata->cur_job) {
-            sx__job* cur_job = tdata->cur_job;
-            tdata->cur_job = NULL;
-            cur_job->owner_tid = tdata->tid;
-            
-            sx_lock(&ctx->job_lk);
-            int list_idx = cur_job->desc.priority;
-            sx__job_add_list(&ctx->waiting_list[list_idx], &ctx->waiting_list_last[list_idx],
-                             cur_job);
-            sx_unlock(&ctx->job_lk);
-            
-            if (!tdata->main_thrd)
-                sx_semaphore_post(&ctx->sem, 1);
-        }
-        
-        sx_fiber_switch(tdata->selector_fiber, ctx);    // Switch to selector loop
-        
-        sx_yield_cpu();
-    }
-    
-    // auto-dispatch pending jobs
-    sx_lock(&ctx->job_lk);
-    sx__job_process_pending(ctx);
-    sx_unlock(&ctx->job_lk);
-}
-
 
 void sx_job_wait_and_del(sx_job_context* ctx, sx_job_t job) {
     sx__job_thread_data* tdata = (sx__job_thread_data*)sx_tls_get(ctx->thread_tls);
