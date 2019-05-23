@@ -30,6 +30,7 @@ typedef struct sx__job {
     uint32_t        tags;
     sx_fiber_stack  stack_mem;
     sx_fiber_t      fiber;
+    sx_fiber_t      selector_fiber;
     sx_job_t        counter;
     sx_job_t        wait_counter;
     sx_job_desc     desc;
@@ -87,7 +88,9 @@ static void fiber_fn(sx_fiber_transfer transfer) {
     sx_job_context*      ctx = job->ctx;
     sx__job_thread_data* tdata = (sx__job_thread_data*)sx_tls_get(ctx->thread_tls);
 
-    sx_assert(tdata->cur_job == NULL);
+    sx_assert(tdata->cur_job == job);
+    
+    job->selector_fiber = transfer.from;
     tdata->selector_fiber = transfer.from;
     tdata->cur_job = job;
 
@@ -208,6 +211,8 @@ static void sx__job_selector_main_thrd(sx_fiber_transfer transfer) {
         }
 
         // Run the job from beginning, or continue after 'wait'
+        tdata->selector_fiber = r.job->selector_fiber;
+        tdata->cur_job = r.job;
         r.job->fiber = sx_fiber_switch(r.job->fiber, r.job).from;
 
         // Delete the job and decrement job counter if it's done
@@ -244,6 +249,8 @@ static void sx__job_selector_fn(sx_fiber_transfer transfer) {
             }
 
             // Run the job from beginning, or continue after 'wait'
+            tdata->selector_fiber = r.job->selector_fiber;
+            tdata->cur_job = r.job;
             r.job->fiber = sx_fiber_switch(r.job->fiber, r.job).from;
 
             // Delete the job and decrement job counter if it's done
